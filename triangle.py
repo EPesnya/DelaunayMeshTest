@@ -119,7 +119,7 @@ def check_mesh_delaunay(points, triangles):
 
         for i in range(len(points)):
             if i not in tri:
-                if norm(points[i] - center_0) < r:
+                if norm(points[i] - center_0) - r < 0.01:
                     b_points.append(points[i])
 
         if len(b_points) > 0:
@@ -131,13 +131,20 @@ def check_mesh_delaunay(points, triangles):
             D = - a[0] * A - a[1] * B - a[2] * C
 
             norm_ABC = norm([A, B, C])
-            A, B, C = A / norm_ABC, B / norm_ABC, C / norm_ABC
 
             dist = (
                 A * b_points[:, 0] + \
                 B * b_points[:, 1] + \
                 C * b_points[:, 2] + D
                 ) / norm_ABC
+
+            # Проверяем не лежат ли 4 точки в одной плоскости
+
+            abs_dist = abs(dist)
+
+            if min(abs_dist) < 0.01:
+                return False
+
 
             # Проверяем что все точки лежат с одной стороны
 
@@ -147,14 +154,18 @@ def check_mesh_delaunay(points, triangles):
 
             # Ищем ближайшую
 
-            abs_dist = abs(dist)
-            # if min(abs_dist) == 0:
-            #     return False
-            min_dist_index = np.where(abs_dist == min(abs_dist))
+
+            dist_to_center = \
+                (b_points[:, 0] - center_0[0])**2 + \
+                (b_points[:, 1] - center_0[1])**2 + \
+                (b_points[:, 2] - center_0[2])**2
+
+            min_dist_index = np.where(dist_to_center == min(dist_to_center))
             min_b_point = (b_points[min_dist_index])[0]
 
             center_1 = centr_sphere(min_b_point, a, b, c)
             R = norm(a - center_1)
+
 
             bad_dot.append(go.Scatter3d(
                 x = [min_b_point[0]],
@@ -194,9 +205,9 @@ def check_mesh_delaunay(points, triangles):
                         mode='lines'
                     ))
 
-            # for point in points:
-            #     if norm(point - center_1) < R:
-            #         return False
+            for point in points:
+                if norm(point - center_1) < R:
+                    return False
 
     return True
 
