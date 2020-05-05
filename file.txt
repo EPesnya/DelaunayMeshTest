@@ -1,7 +1,0 @@
-fl =f.readlines()
-    #for x in fl:
-    #print(x)
-
-fl =f.readlines()
-    #for x in fl:
-    #print(x)

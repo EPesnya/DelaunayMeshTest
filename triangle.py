@@ -119,7 +119,7 @@ def check_mesh_delaunay(points, triangles):
 
         for i in range(len(points)):
             if i not in tri:
-                if norm(points[i] - center_0) - r < 0.01:
+                if norm(points[i] - center_0) - r < -0.01:
                     b_points.append(points[i])
 
         if len(b_points) > 0:
@@ -143,6 +143,37 @@ def check_mesh_delaunay(points, triangles):
             abs_dist = abs(dist)
 
             if min(abs_dist) < 0.01:
+                zero_dist_index = np.where(abs_dist == min(abs_dist))
+                zero_b_point = (b_points[zero_dist_index])[0]
+
+                bad_dot.append(go.Scatter3d(
+                    x = [zero_b_point[0]],
+                    y = [zero_b_point[1]],
+                    z = [zero_b_point[2]]
+                    ))
+
+                tri_plot.append(go.Scatter3d(
+                    x = [a[0], b[0], c[0]],
+                    y = [a[1], b[1], c[1]],
+                    z = [a[2], b[2], c[2]],
+                    mode='markers',
+                    marker=dict(
+                        color=[2, 2, 2],
+                        colorscale='Viridis',
+                        opacity=0.8
+                        )
+                    ))
+
+                x_s = r*np.cos(u)*np.sin(v)
+                y_s = r*np.sin(u)*np.sin(v)
+                z_s = r*np.cos(v)
+                sphere.append(go.Scatter3d(
+                    x = x_s.flatten() + center_0[0],
+                    y = y_s.flatten() + center_0[1],
+                    z = z_s.flatten() + center_0[2],
+                    mode='lines'
+                    ))
+
                 return False
 
 
@@ -166,6 +197,7 @@ def check_mesh_delaunay(points, triangles):
             center_1 = centr_sphere(min_b_point, a, b, c)
             R = norm(a - center_1)
 
+            # Draw
 
             bad_dot.append(go.Scatter3d(
                 x = [min_b_point[0]],
@@ -179,8 +211,8 @@ def check_mesh_delaunay(points, triangles):
                 z = [a[2], b[2], c[2]],
                 mode='markers',
                 marker=dict(
-                    color=[2, 2, 2], # set color to an array/list of desired values
-                    colorscale='Viridis', # choose a colorscale
+                    color=[2, 2, 2],
+                    colorscale='Viridis',
                     opacity=0.8
                     )
                 ))
@@ -189,21 +221,21 @@ def check_mesh_delaunay(points, triangles):
             y_s = r*np.sin(u)*np.sin(v)
             z_s = r*np.cos(v)
             sphere.append(go.Scatter3d(
-                        x = x_s.flatten() + center_0[0],
-                        y = y_s.flatten() + center_0[1],
-                        z = z_s.flatten() + center_0[2],
-                        mode='lines'
-                    ))
+                x = x_s.flatten() + center_0[0],
+                y = y_s.flatten() + center_0[1],
+                z = z_s.flatten() + center_0[2],
+                mode='lines'
+                ))
 
             x_s = R*np.cos(u)*np.sin(v)
             y_s = R*np.sin(u)*np.sin(v)
             z_s = R*np.cos(v)
             sphere.append(go.Scatter3d(
-                        x = x_s.flatten() + center_1[0],
-                        y = y_s.flatten() + center_1[1],
-                        z = z_s.flatten() + center_1[2],
-                        mode='lines'
-                    ))
+                x = x_s.flatten() + center_1[0],
+                y = y_s.flatten() + center_1[1],
+                z = z_s.flatten() + center_1[2],
+                mode='lines'
+                ))
 
             for point in points:
                 if norm(point - center_1) < R:
