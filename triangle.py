@@ -9,12 +9,11 @@ n_p = 0
 n_tri = 0
 points = []
 triangles = []
-Delone = True
-n_bad = 0
 
 #############
 
-f = open(os.path.join(sys.path[0], "strange_prism.vtk"),"r")
+print('Reading file...')
+f = open(os.path.join(sys.path[0], "cone.vtk"),"r")
 fl = f.readlines()
 
 p_line = 0
@@ -39,26 +38,23 @@ for i in range(t_line, t_line + n_tri):
     triangles.append([int(ps[1]), int(ps[2]), int(ps[3])])
 
 f.close()
+print('Reading done!')
 
 #################
 
 def norm(v):
-    return (v[0]**2 + v[1]**2 + v[2]**2)**0.5
-
+    return np.linalg.norm(v)
 
 def centr_circle(A, B, C):
-    AC_centr = [0.5*(C[0] + A[0]), 0.5*(C[1] + A[1]), 0.5*(C[2] + A[2])]
-    AB_centr = [0.5*(A[0] + B[0]), 0.5*(A[1] + B[1]), 0.5*(A[2] + B[2])]
-    AB = [B[0] - A[0], B[1] - A[1], B[2] - A[2]]
-    AC = [C[0] - A[0], C[1] - A[1], C[2] - A[2]]
-    M = np.array([
-        [AC[0], AC[1], AC[2]], [AB[0], AB[1], AB[2]],
-        [AB[1]*AC[2] - AB[2]*AC[1], AB[2]*AC[0] - AB[0]*AC[2], AB[0]*AC[1] - AC[0]*AB[1]]
-        ])
+    AC_center = 0.5 * (A + C)
+    AB_center = 0.5 * (A + B)
+    AB = B - A
+    AC = C - A
+    M = np.array([AC, AB, np.cross(AB, AC)])
     v = np.array([
-        sum(list(map(lambda a,b : a*b,AC,AC_centr))),
-        sum(list(map(lambda a,b : a*b,AB,AB_centr))),
-        A[0]*(AB[1]*AC[2] - AB[2]*AC[1]) + A[1]*(AB[2]*AC[0] - AB[0]*AC[2]) + A[2]*(AB[0]*AC[1] - AC[0]*AB[1])
+        sum(AC * AC_center),
+        sum(AB * AB_center),
+        sum(A * M[2])
         ])
     return np.linalg.solve(M, v)
 
@@ -82,11 +78,7 @@ def centr_sphere(A, B, C, S):
         [2*(S[0] - C[0]), 2*(S[1] - C[1]), S[0]**2 - C[0]**2 + S[1]**2 - C[1]**2 + S[2]**2 - C[2]**2]
         ])
 
-    det_niz = np.array([
-        [2*(S[0] - A[0]), 2*(S[1] - A[1]), 2*(S[2] - A[2])],
-        [2*(S[0] - B[0]), 2*(S[1] - B[1]), 2*(S[2] - B[2])],
-        [2*(S[0] - C[0]), 2*(S[1] - C[1]), 2*(S[2] - C[2])]
-        ])
+    det_niz = np.array([2*(S - A), 2*(S - B), 2*(S - C)])
 
     d = np.linalg.det(det_niz)
     x = np.linalg.det(x0_ver) / d
@@ -107,7 +99,11 @@ bad_dot = []
 
 def check_mesh_delaunay(points, triangles):
 
-    for tri in triangles:
+    bad_triangles = np.zeros(len(triangles), dtype=np.int8)
+
+    def check_triangle(i):
+        tri = triangles[i]
+
         a = points[tri[0]]
         b = points[tri[1]]
         c = points[tri[2]]
@@ -143,39 +139,7 @@ def check_mesh_delaunay(points, triangles):
             abs_dist = abs(dist)
 
             if min(abs_dist) < 0.01:
-                zero_dist_index = np.where(abs_dist == min(abs_dist))
-                zero_b_point = (b_points[zero_dist_index])[0]
-
-                bad_dot.append(go.Scatter3d(
-                    x = [zero_b_point[0]],
-                    y = [zero_b_point[1]],
-                    z = [zero_b_point[2]]
-                    ))
-
-                tri_plot.append(go.Scatter3d(
-                    x = [a[0], b[0], c[0]],
-                    y = [a[1], b[1], c[1]],
-                    z = [a[2], b[2], c[2]],
-                    mode='markers',
-                    marker=dict(
-                        color=[2, 2, 2],
-                        colorscale='Viridis',
-                        opacity=0.8
-                        )
-                    ))
-
-                x_s = r*np.cos(u)*np.sin(v)
-                y_s = r*np.sin(u)*np.sin(v)
-                z_s = r*np.cos(v)
-                sphere.append(go.Scatter3d(
-                    x = x_s.flatten() + center_0[0],
-                    y = y_s.flatten() + center_0[1],
-                    z = z_s.flatten() + center_0[2],
-                    mode='lines'
-                    ))
-
                 return False
-
 
             # Проверяем что все точки лежат с одной стороны
 
@@ -184,7 +148,6 @@ def check_mesh_delaunay(points, triangles):
                     return False
 
             # Ищем ближайшую
-
 
             dist_to_center = \
                 (b_points[:, 0] - center_0[0])**2 + \
@@ -197,88 +160,59 @@ def check_mesh_delaunay(points, triangles):
             center_1 = centr_sphere(min_b_point, a, b, c)
             R = norm(a - center_1)
 
-            # Draw
-
-            bad_dot.append(go.Scatter3d(
-                x = [min_b_point[0]],
-                y = [min_b_point[1]],
-                z = [min_b_point[2]]
-                ))
-
-            tri_plot.append(go.Scatter3d(
-                x = [a[0], b[0], c[0]],
-                y = [a[1], b[1], c[1]],
-                z = [a[2], b[2], c[2]],
-                mode='markers',
-                marker=dict(
-                    color=[2, 2, 2],
-                    colorscale='Viridis',
-                    opacity=0.8
-                    )
-                ))
-
-            x_s = r*np.cos(u)*np.sin(v)
-            y_s = r*np.sin(u)*np.sin(v)
-            z_s = r*np.cos(v)
-            sphere.append(go.Scatter3d(
-                x = x_s.flatten() + center_0[0],
-                y = y_s.flatten() + center_0[1],
-                z = z_s.flatten() + center_0[2],
-                mode='lines'
-                ))
-
-            x_s = R*np.cos(u)*np.sin(v)
-            y_s = R*np.sin(u)*np.sin(v)
-            z_s = R*np.cos(v)
-            sphere.append(go.Scatter3d(
-                x = x_s.flatten() + center_1[0],
-                y = y_s.flatten() + center_1[1],
-                z = z_s.flatten() + center_1[2],
-                mode='lines'
-                ))
-
             for point in points:
-                if norm(point - center_1) < R:
+                if norm(point - center_1) - R < -0.01:
                     return False
 
-    return True
+        return True
 
-############
+    for i in range(len(triangles)):
+        if check_triangle(i) == False:
+            bad_triangles[i] = 1
 
+    return bad_triangles
+
+#############
 
 points = np.array(points)
 triangles = np.array(triangles)
+bad_triangles = check_mesh_delaunay(points, triangles)
 
-print(check_mesh_delaunay(points, triangles))
+#############
 
-tri_points = points[triangles]
+print('Writing file...')
+f = open(os.path.join(sys.path[0], "output.vtk"),"w")
 
-# #extract the lists of x, y, z coordinates of the triangle vertices and connect them by a line
-Xe = []
-Ye = []
-Ze = []
-for T in tri_points:
-    Xe.extend([T[k%3][0] for k in range(4)]+[ None])
-    Ye.extend([T[k%3][1] for k in range(4)]+[ None])
-    Ze.extend([T[k%3][2] for k in range(4)]+[ None])
-       
-# #define the trace for triangle sides
-lines = go.Scatter3d(
-                   x=Xe,
-                   y=Ye,
-                   z=Ze,
-                   mode='lines'
-                )
+f.write(
+"""# vtk DataFile Version 2.0
+Delaunay check output
+ASCII
+DATASET UNSTRUCTURED_GRID
+"""
+)
 
+f.write('POINTS {} float\n'.format(n_p))
+for i in range(n_p):
+    f.write('{} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2]))
 
-# surface = go.Mesh3d(
-#     x=points[:,0],
-#     y=points[:,1],
-#     z=points[:,2],
-#     i=triangles[:,0],
-#     j=triangles[:,1],
-#     k=triangles[:,2]
-#     )
+f.write('CELLS {} {}\n'.format(n_tri, 4 * n_tri))
+for i in range(n_tri):
+    f.write('3 {} {} {}\n'.format(triangles[i, 0], triangles[i, 1], triangles[i, 2]))
 
-fig = go.Figure(data=[lines] + sphere + tri_plot + bad_dot)
-fig.show()
+f.write('CELL_TYPES {}\n'.format(n_tri))
+for i in range(n_tri):
+    f.write('5\n')
+
+f.write(
+"""CELL_DATA {}
+SCALARS scalars int
+LOOKUP_TABLE default
+""".format(n_tri)
+)
+for i in range(n_tri):
+    f.write(str(bad_triangles[i]) + '\n')
+
+f.close()
+print('Writing done!')
+
+###############
