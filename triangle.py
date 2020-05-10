@@ -1,18 +1,16 @@
-import os
-import sys
 import numpy as np
+import iovtk
 
 #############
 
-epsilon = 0.00000001
+epsilon_r = 1e-10
+epsilon_zero_dist = 1e-2
 
-n_p = 0
-n_tri = 0
 points = []
 triangles = []
+points, triangles = iovtk.read_ug_tri('cone')
 
-l_u = 30
-l_v = 30
+l_u, l_v = 30, 30
 u = np.linspace(0, 2*np.pi, l_u)
 v = np.linspace(0, np.pi, l_v)
 u, v = np.meshgrid(u, v)
@@ -23,40 +21,6 @@ z_s = np.cos(v)
 
 s_points = []
 spheres_elem = []
-
-tri_plot = []
-bad_dot = []
-sphere = []
-
-#############
-
-print('Reading file...')
-f = open(os.path.join(sys.path[0], "cone.vtk"),"r")
-fl = f.readlines()
-
-p_line = 0
-t_line = 0
-for i in range(len(fl)):
-    x = fl[i]
-    if 'POINTS' in x:
-        n_p = int(x.split(' ')[1])
-        p_line = i + 1
-    if 'CELLS' in x:
-        n_tri = int(x.split(' ')[1])
-        t_line = i + 1
-
-for i in range(p_line, p_line + n_p):
-    x = fl[i]
-    ps = x.split(' ')
-    points.append([float(ps[0]), float(ps[1]), float(ps[2])])
-
-for i in range(t_line, t_line + n_tri):
-    x = fl[i]
-    ps = x.split(' ')
-    triangles.append([int(ps[1]), int(ps[2]), int(ps[3])])
-
-f.close()
-print('Reading done!')
 
 #################
 
@@ -107,6 +71,13 @@ def centr_sphere(A, B, C, S):
     z = np.linalg.det(z0_ver) / d
     return x, y, z 
 
+def plane_from_points(a, b, c):
+    A = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1])
+    B = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2])
+    C = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    D = - a[0] * A - a[1] * B - a[2] * C
+    return A, B, C, D
+
 def add_sphere(x, y, z):
     n_s_p = len(s_points)
     s_points.append([x[0, 0], y[0, 0], z[0, 0]])
@@ -118,18 +89,18 @@ def add_sphere(x, y, z):
     s_points.append([x[-1, 0], y[-1, 0], z[-1, 0]])
 
     for i in range(l_u - 2):
-        spheres_elem.append([3, n_s_p, n_s_p + i + 1, n_s_p + i + 2, 0])
-    spheres_elem.append([3, n_s_p, n_s_p + l_u - 1, n_s_p + 1, 0])
+        spheres_elem.append([n_s_p, n_s_p + i + 1, n_s_p + i + 2])
+    spheres_elem.append([n_s_p, n_s_p + l_u - 1, n_s_p + 1])
 
     for i in range(l_v - 3):
         for j in range(l_u - 2):
-            spheres_elem.append([4,
+            spheres_elem.append([
                 n_s_p + 1 + i * (l_u - 1) + j,
                 n_s_p + 1 + (i + 1) * (l_u - 1) + j,
                 n_s_p + 1 + (i + 1) * (l_u - 1) + j + 1,
                 n_s_p + 1 + i * (l_u - 1) + j + 1
                 ])
-        spheres_elem.append([4,
+        spheres_elem.append([
             n_s_p + 1 + i * (l_u - 1) + l_u - 2,
             n_s_p + 1 + (i + 1) * (l_u - 1) + l_u - 2,
             n_s_p + 1 + (i + 1) * (l_u - 1),
@@ -137,17 +108,15 @@ def add_sphere(x, y, z):
             ])
 
     for i in range(l_u - 2):
-        spheres_elem.append([3,
+        spheres_elem.append([
             n_s_p + 1 + (l_v - 3) * (l_u - 1) + i,
             n_s_p + 1 + (l_v - 3) * (l_u - 1) + i + 1,
-            n_s_p + 1 + (l_v - 2) * (l_u - 1),
-            0
+            n_s_p + 1 + (l_v - 2) * (l_u - 1)
             ])
-    spheres_elem.append([3,
+    spheres_elem.append([
         n_s_p + 1 + (l_v - 3) * (l_u - 1) + l_u - 2,
         n_s_p + 1 + (l_v - 3) * (l_u - 1),
-        n_s_p + 1 + (l_v - 2) * (l_u - 1),
-        0
+        n_s_p + 1 + (l_v - 2) * (l_u - 1)
         ])
 
 def find_neighbors(triangles):
@@ -166,16 +135,44 @@ def find_neighbors(triangles):
 
     return np.array(neighbors)
 
-
-
 ################
 
 def check_mesh_delaunay(points, triangles):
 
+    print('Checking...')
     bad_triangles = np.zeros(len(triangles), dtype=np.int8)
+
     print('Finding neighbors...')
     neighbors = find_neighbors(triangles)
     print('Neighbors are found!')
+
+
+    def rebuild(tri_n, bad_neighbor):
+        tri = triangles[tri_n]
+        common = list(set(tri) & set(triangles[bad_neighbor]))
+
+        if len(common) == 2:
+            t_1 = list(set(tri) - set(common)) + [common[0]] + list(set(triangles[bad_neighbor]) - set(common))
+            t_2 = list(set(triangles[bad_neighbor]) - set(common)) + [common[1]] + list(set(tri) - set(common))
+
+            bad_triangles[bad_neighbor] = 1
+            bad_triangles[tri_n] = 1
+
+            sides_1 = [tri_n] + [list(set(neighbors[bad_neighbor]) - set([tri_n]))[0]] + \
+                [list(set(neighbors[tri_n]) - set([bad_neighbor]))[1]]
+            sides_2 = [bad_neighbor] + [list(set(neighbors[tri_n]) - set([bad_neighbor]))[0]] + \
+                [list(set(neighbors[bad_neighbor]) - set([tri_n]))[1]]
+
+            for j in range(3):
+                if neighbors[list(set(neighbors[bad_neighbor]) - set([tri_n]))[1]][j] == bad_neighbor:
+                    neighbors[list(set(neighbors[bad_neighbor]) - set([tri_n]))[1]][j] = tri_n
+                if neighbors[list(set(neighbors[tri_n]) - set([bad_neighbor]))[1]][j] == tri_n:
+                    neighbors[list(set(neighbors[tri_n]) - set([bad_neighbor]))[1]][j] = bad_neighbor
+
+            neighbors[tri_n] = np.array(sides_1)
+            neighbors[bad_neighbor] = np.array(sides_2)
+            triangles[bad_neighbor] = np.array(t_1)
+            triangles[tri_n] = np.array(t_2)
 
     def check_triangle(i):
         tri = triangles[i]
@@ -193,65 +190,44 @@ def check_mesh_delaunay(points, triangles):
 
         for i in range(len(points)):
             if i not in tri:
-                if norm_2(points[i] - center_0) - r_2 < -epsilon:
+                if norm_2(points[i] - center_0) - r_2 < -epsilon_r:
                     b_points.append(points[i])
+
 
         if len(b_points) > 0:
             b_points = np.array(b_points)
+            bad_neighbor = None
 
-            A = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1])
-            B = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2])
-            C = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-            D = - a[0] * A - a[1] * B - a[2] * C
+            for b_point in b_points:
+                for n in neighbors[tri_n]:
+                    pnts = points[triangles[n]]
+                    if np.array_equal(b_point, pnts[0]) or np.array_equal(b_point, pnts[1]) or np.array_equal(b_point, pnts[2]):
+                        bad_neighbor = n
+                        break
 
+            A, B, C, D = plane_from_points(a, b, c)
             dist = (
                 A * b_points[:, 0] + \
                 B * b_points[:, 1] + \
                 C * b_points[:, 2] + \
                 D
                 )
-            # Проверяем не лежат ли 4 точки в одной плоскости
-
             abs_dist = abs(dist)
 
-            if min(abs_dist) < epsilon:
-                min_dist_index = np.where(abs_dist == min(abs_dist))
-                min_b_point = (b_points[min_dist_index])[0]
+            if bad_neighbor != None:
+                normal_t = np.array([A, B, C]) 
+                a_1 = points[triangles[bad_neighbor][0]]
+                b_1 = points[triangles[bad_neighbor][1]]
+                c_1 = points[triangles[bad_neighbor][2]]
+                A, B, C, D = plane_from_points(a_1, b_1, c_1)
+                normal_n = np.array([A, B, C])
+                cos_angle_2 = np.dot(normal_t, normal_n)**2 / norm_2(normal_n) / norm_2(normal_t)
 
-                bad_neighbor = None
-
-                for n in neighbors[tri_n]:
-                    pnts = points[triangles[n]]
-                    if np.array_equal(min_b_point, pnts[0]) or np.array_equal(min_b_point, pnts[1]) or np.array_equal(min_b_point, pnts[2]):
-                        bad_neighbor = n
-                        break
-
-                if bad_neighbor != None:
-                    common = list(set(tri) & set(triangles[bad_neighbor]))
-
-                    t_1 = list(set(tri) - set(common)) + [common[0]] + list(set(triangles[bad_neighbor]) - set(common))
-                    t_2 = list(set(triangles[bad_neighbor]) - set(common)) + [common[1]] + list(set(tri) - set(common))
-
-                    bad_triangles[bad_neighbor] = 1
-                    bad_triangles[tri_n] = 1
-
-                    sides_1 = [tri_n] + [list(set(neighbors[bad_neighbor]) - set([tri_n]))[0]] + \
-                        [list(set(neighbors[tri_n]) - set([bad_neighbor]))[1]]
-                    sides_2 = [bad_neighbor] + [list(set(neighbors[tri_n]) - set([bad_neighbor]))[0]] + \
-                        [list(set(neighbors[bad_neighbor]) - set([tri_n]))[1]]
-
-                    for j in range(3):
-                        if neighbors[list(set(neighbors[bad_neighbor]) - set([tri_n]))[1], j] == bad_neighbor:
-                            neighbors[list(set(neighbors[bad_neighbor]) - set([tri_n]))[1], j] = tri_n
-                        if neighbors[list(set(neighbors[tri_n]) - set([bad_neighbor]))[1], j] == tri_n:
-                            neighbors[list(set(neighbors[tri_n]) - set([bad_neighbor]))[1], j] = bad_neighbor
-
-                    neighbors[tri_n] = np.array(sides_1)
-                    neighbors[bad_neighbor] = np.array(sides_2)
-                    triangles[bad_neighbor] = np.array(t_1)
-                    triangles[tri_n] = np.array(t_2)
+                if cos_angle_2 > 3/4:
+                    rebuild(tri_n, bad_neighbor)
                     return True
 
+            if min(abs_dist) < epsilon_zero_dist:
                 add_sphere(
                     r*x_s + center_0[0],
                     r*y_s + center_0[1],
@@ -282,51 +258,13 @@ def check_mesh_delaunay(points, triangles):
 
             center_1 = centr_sphere(min_b_point, a, b, c)
             R_2 = norm_2(a - center_1)
-            R = R_2**0.5
 
             for point in points:
-                if norm_2(point - center_1) - R_2 < -epsilon:
-
-                    if abs_dist[min_dist_index] < 0.01:
-                        bad_neighbor = None
-
-                        for n in neighbors[tri_n]:
-                            pnts = points[triangles[n]]
-                            if np.array_equal(min_b_point, pnts[0]) or np.array_equal(min_b_point, pnts[1]) or np.array_equal(min_b_point, pnts[2]):
-                                bad_neighbor = n
-                                break
-
-                        if bad_neighbor != None:
-                            common = list(set(tri) & set(triangles[bad_neighbor]))
-
-                            if len(common) == 2:
-                                t_1 = list(set(tri) - set(common)) + [common[0]] + list(set(triangles[bad_neighbor]) - set(common))
-                                t_2 = list(set(triangles[bad_neighbor]) - set(common)) + [common[1]] + list(set(tri) - set(common))
-
-                                bad_triangles[bad_neighbor] = 1
-                                bad_triangles[tri_n] = 1
-
-                                sides_1 = [tri_n] + [list(set(neighbors[bad_neighbor]) - set([tri_n]))[0]] + \
-                                    [list(set(neighbors[tri_n]) - set([bad_neighbor]))[1]]
-                                sides_2 = [bad_neighbor] + [list(set(neighbors[tri_n]) - set([bad_neighbor]))[0]] + \
-                                    [list(set(neighbors[bad_neighbor]) - set([tri_n]))[1]]
-
-                                for j in range(3):
-                                    if neighbors[list(set(neighbors[bad_neighbor]) - set([tri_n]))[1], j] == bad_neighbor:
-                                        neighbors[list(set(neighbors[bad_neighbor]) - set([tri_n]))[1], j] = tri_n
-                                    if neighbors[list(set(neighbors[tri_n]) - set([bad_neighbor]))[1], j] == tri_n:
-                                        neighbors[list(set(neighbors[tri_n]) - set([bad_neighbor]))[1], j] = bad_neighbor
-
-                                neighbors[tri_n] = np.array(sides_1)
-                                neighbors[bad_neighbor] = np.array(sides_2)
-                                triangles[bad_neighbor] = np.array(t_1)
-                                triangles[tri_n] = np.array(t_2)
-                                return True
-
+                if norm_2(point - center_1) - R_2 < -epsilon_r:
                     add_sphere(
-                        r*x_s + center_1[0],
-                        r*y_s + center_1[1],
-                        r*z_s + center_1[2]
+                        r*x_s + center_0[0],
+                        r*y_s + center_0[1],
+                        r*z_s + center_0[2]
                         )
                     return False
 
@@ -337,98 +275,18 @@ def check_mesh_delaunay(points, triangles):
             if check_triangle(i) == False:
                 bad_triangles[i] = 2
 
+    print('Checked!')
     return bad_triangles
 
 #############
 
 points = np.array(points)
 triangles = np.array(triangles)
-print('Checking...')
+
 bad_triangles = check_mesh_delaunay(points, triangles)
-print('Checked!')
 
-#############
 
-print('Writing model...')
-f = open(os.path.join(sys.path[0], "output.vtk"),"w")
-
-f.write(
-"""# vtk DataFile Version 2.0
-Delaunay check output
-ASCII
-DATASET UNSTRUCTURED_GRID
-"""
-)
-
-f.write('POINTS {} float\n'.format(n_p))
-for i in range(n_p):
-    f.write('{} {} {}\n'.format(points[i, 0], points[i, 1], points[i, 2]))
-
-f.write('CELLS {} {}\n'.format(n_tri, 4 * n_tri))
-for i in range(n_tri):
-    f.write('3 {} {} {}\n'.format(triangles[i, 0], triangles[i, 1], triangles[i, 2]))
-
-f.write('CELL_TYPES {}\n'.format(n_tri))
-for i in range(n_tri):
-    f.write('5\n')
-
-f.write(
-"""CELL_DATA {}
-SCALARS scalars int
-LOOKUP_TABLE default
-""".format(n_tri)
-)
-for i in range(n_tri):
-    f.write(str(bad_triangles[i]) + '\n')
-
-f.close()
-print('Writing done!')
-
-###############
+iovtk.write_ug('output', points, triangles, bad_triangles)
 
 if len(s_points) > 0:
-    print('Writing spheres...')
-    f = open(os.path.join(sys.path[0], "output_spheres.vtk"),"w")
-
-    f.write(
-    """# vtk DataFile Version 2.0
-Delaunay check output
-ASCII
-DATASET UNSTRUCTURED_GRID
-"""
-    )
-
-    s_points = np.array(s_points)
-    spheres_elem = np.array(spheres_elem)
-    f.write('POINTS {} float\n'.format(len(s_points)))
-    for i in range(len(s_points)):
-        f.write('{:.6f} {:.6f} {:.6f}\n'.format(s_points[i, 0], s_points[i, 1], s_points[i, 2]))
-
-    f.write('CELLS {} {}\n'.format(len(spheres_elem), sum(spheres_elem[:, 0] + 1)))
-    for i in range(len(spheres_elem)):
-        if spheres_elem[i, 0] == 3:
-            f.write('3 {} {} {}\n'.format(
-                spheres_elem[i, 1],
-                spheres_elem[i, 2],
-                spheres_elem[i, 3]
-                ))
-        else:
-            f.write('4 {} {} {} {}\n'.format(
-                spheres_elem[i, 1],
-                spheres_elem[i, 2],
-                spheres_elem[i, 3],
-                spheres_elem[i, 4]
-                ))
-
-    f.write('CELL_TYPES {}\n'.format(len(spheres_elem)))
-    for i in range(len(spheres_elem)):
-        if spheres_elem[i, 0] == 3:
-            f.write('5\n')
-        else:
-            f.write('9\n')
-
-
-    f.close()
-    print('Writing done!')
-
-###############
+    iovtk.write_ug('output_spheres', s_points, spheres_elem)
