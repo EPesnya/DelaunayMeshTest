@@ -1,5 +1,0 @@
-points = np.array(points)
-# triangles = np.array(triangles)
-# print('Checking...')
-# bad_triangles = check_mesh_delaunay(points, triangles)
-# print('Checked!')

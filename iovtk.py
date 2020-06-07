@@ -1,15 +1,11 @@
-import os
-import sys
-
 def read_ug_tri(filename):
     points = []
     triangles = []
     n_p = 0
     n_tri = 0
-    filename += '.vtk'
 
     print('Reading file ' + filename)
-    f = open(os.path.join(sys.path[0], filename),"r")
+    f = open(filename,"r")
     fl = f.readlines()
 
     p_line = 0
@@ -46,7 +42,7 @@ def write_ug(filename, points, elements, data = []):
     filename += '.vtk'
 
     print('Writing model ' + filename)
-    f = open(os.path.join(sys.path[0], filename),"w")
+    f = open(filename,"w")
 
     f.write(
         "# vtk DataFile Version 2.0\n" +
@@ -77,14 +73,22 @@ def write_ug(filename, points, elements, data = []):
             f.write('9\n')
 
     if len(data) > 0:
-        f.write(
-        """CELL_DATA {}
-        SCALARS scalars int
-        LOOKUP_TABLE default
-        """.format(n_e)
-        )
-        for i in range(n_e):
-            f.write(str(data[i]) + '\n')
+        if len(list([data[0]])) > 1:
+            f.write(
+                "CELL_DATA {}\n".format(len(data)) +
+                "SCALARS scalars float 4\n" +
+                "LOOKUP_TABLE default\n"
+            )
+            for i in range(len(data)):
+                f.write(' '.join(map(str, data[i])) + '\n')
+        else:
+            f.write(
+                "CELL_DATA {}\n".format(len(data)) +
+                "SCALARS scalars int\n" +
+                "LOOKUP_TABLE default\n"
+            )
+            for i in range(len(data)):
+                f.write(str(data[i]) + '\n')
 
     f.close()
     print('Writing done!')

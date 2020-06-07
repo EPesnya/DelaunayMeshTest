@@ -1,14 +1,23 @@
 import numpy as np
 import iovtk
+import sys
 
 #############
 
 epsilon_r = 1e-10
-epsilon_zero_dist = 1e-2
+epsilon_zero_dist = 1e-5
+angle = 3**0.5/2
 
 points = []
 triangles = []
-points, triangles = iovtk.read_ug_tri('cone')
+points, triangles = iovtk.read_ug_tri(sys.argv[1])
+
+s_points = []
+
+sphere_points = []
+spheres_elem = []
+
+################
 
 l_u, l_v = 30, 30
 u = np.linspace(0, 2*np.pi, l_u)
@@ -18,9 +27,6 @@ u, v = np.meshgrid(u, v)
 x_s = np.cos(u)*np.sin(v)
 y_s = np.sin(u)*np.sin(v)
 z_s = np.cos(v)
-
-s_points = []
-spheres_elem = []
 
 #################
 
@@ -79,14 +85,14 @@ def plane_from_points(a, b, c):
     return A, B, C, D
 
 def add_sphere(x, y, z):
-    n_s_p = len(s_points)
-    s_points.append([x[0, 0], y[0, 0], z[0, 0]])
+    n_s_p = len(sphere_points)
+    sphere_points.append([x[0, 0], y[0, 0], z[0, 0]])
 
     for i in range(1, l_v - 1):
         for j in range(l_u - 1):
-            s_points.append([x[i, j], y[i, j], z[i, j]])
+            sphere_points.append([x[i, j], y[i, j], z[i, j]])
 
-    s_points.append([x[-1, 0], y[-1, 0], z[-1, 0]])
+    sphere_points.append([x[-1, 0], y[-1, 0], z[-1, 0]])
 
     for i in range(l_u - 2):
         spheres_elem.append([n_s_p, n_s_p + i + 1, n_s_p + i + 2])
@@ -186,12 +192,7 @@ def check_mesh_delaunay(points, triangles):
         r_2 = norm_2(a - center_0)
         r = r_2**0.5
 
-        b_points = []
-
-        for i in range(len(points)):
-            if i not in tri:
-                if norm_2(points[i] - center_0) - r_2 < -epsilon_r:
-                    b_points.append(points[i])
+        b_points = list(filter(lambda x: norm_2(x - center_0) + epsilon_r < r_2, points))
 
 
         if len(b_points) > 0:
@@ -200,12 +201,16 @@ def check_mesh_delaunay(points, triangles):
 
             for b_point in b_points:
                 for n in neighbors[tri_n]:
-                    pnts = points[triangles[n]]
-                    if np.array_equal(b_point, pnts[0]) or np.array_equal(b_point, pnts[1]) or np.array_equal(b_point, pnts[2]):
+                    common = list(set(tri) & set(triangles[n]))
+                    temp = list(set(triangles[n]) - set(common))
+                    pnt = points[temp[0]]
+                    if np.array_equal(b_point, pnt):
                         bad_neighbor = n
                         break
 
             A, B, C, D = plane_from_points(a, b, c)
+            normal_t = np.array([A, B, C])
+
             dist = (
                 A * b_points[:, 0] + \
                 B * b_points[:, 1] + \
@@ -213,37 +218,30 @@ def check_mesh_delaunay(points, triangles):
                 D
                 )
             abs_dist = abs(dist)
-
-            if bad_neighbor != None:
-                normal_t = np.array([A, B, C]) 
-                a_1 = points[triangles[bad_neighbor][0]]
-                b_1 = points[triangles[bad_neighbor][1]]
-                c_1 = points[triangles[bad_neighbor][2]]
-                A, B, C, D = plane_from_points(a_1, b_1, c_1)
-                normal_n = np.array([A, B, C])
-                cos_angle_2 = np.dot(normal_t, normal_n)**2 / norm_2(normal_n) / norm_2(normal_t)
-
-                if cos_angle_2 > 3/4:
-                    rebuild(tri_n, bad_neighbor)
-                    return True
+                    
+            # Проверяем лежит ли точка в плоскости треугольника
 
             if min(abs_dist) < epsilon_zero_dist:
-                add_sphere(
-                    r*x_s + center_0[0],
-                    r*y_s + center_0[1],
-                    r*z_s + center_0[2]
+                if bad_neighbor == None:
+                    add_sphere(
+                            r*x_s + center_0[0],
+                            r*y_s + center_0[1],
+                            r*z_s + center_0[2]
                     )
-                return False
+                    return False
+                else:
+                    rebuild(tri_n, bad_neighbor)
+                    return True
 
             # Проверяем что все точки лежат с одной стороны
 
             for i in range(1, len(b_points)):
                 if np.sign(dist[i]) != np.sign(dist[0]):
                     add_sphere(
-                        r*x_s + center_0[0],
-                        r*y_s + center_0[1],
-                        r*z_s + center_0[2]
-                        )
+                            r*x_s + center_0[0],
+                            r*y_s + center_0[1],
+                            r*z_s + center_0[2]
+                    )
                     return False
 
             # Ищем ближайшую
@@ -253,20 +251,49 @@ def check_mesh_delaunay(points, triangles):
                 (b_points[:, 1] - center_0[1])**2 + \
                 (b_points[:, 2] - center_0[2])**2
 
-            min_dist_index = np.where(dist_to_center == min(dist_to_center))
-            min_b_point = (b_points[min_dist_index])[0]
+            min_center_dist_index = np.where(dist_to_center == min(dist_to_center))
+            min_center_dist_point = (b_points[min_center_dist_index])[0]
+            min_abs_dist_index = np.where(abs_dist == min(abs_dist))
+            min_abs_dist_point = (b_points[min_abs_dist_index])[0]
 
-            center_1 = centr_sphere(min_b_point, a, b, c)
-            R_2 = norm_2(a - center_1)
+            center_1_0 = centr_sphere(min_center_dist_point, a, b, c)
+            center_1_1 = centr_sphere(min_abs_dist_point, a, b, c)
+            R0_2 = norm_2(a - center_1_0)
+            R1_2 = norm_2(a - center_1_1)
+
+            if R0_2 < R1_2:
+                R0_2 = R1_2
+                center_1_0 = center_1_1
+
+            R = R0_2**0.5
 
             for point in points:
-                if norm_2(point - center_1) - R_2 < -epsilon_r:
+                if norm_2(point - center_1_0) - R0_2 < -epsilon_r:
+
+                    if bad_neighbor != None:
+                        a_1 = points[triangles[bad_neighbor][0]]
+                        b_1 = points[triangles[bad_neighbor][1]]
+                        c_1 = points[triangles[bad_neighbor][2]]
+                        A, B, C, D = plane_from_points(a_1, b_1, c_1)
+                        normal_n = np.array([A, B, C])
+
+                        cos_angle = np.dot(normal_t, normal_n) / (norm_2(normal_n) * norm_2(normal_t))**0.5
+
+                        if abs(cos_angle) >= angle:
+                            rebuild(tri_n, bad_neighbor)
+                            return True
+
                     add_sphere(
-                        r*x_s + center_0[0],
-                        r*y_s + center_0[1],
-                        r*z_s + center_0[2]
-                        )
+                        R*x_s + center_1_0[0],
+                        R*y_s + center_1_0[1],
+                        R*z_s + center_1_0[2]
+                    )
                     return False
+
+            s_points.append([center_1_0[0], center_1_0[1], center_1_0[2], R])
+
+        else:
+            s_points.append([center_0[0], center_0[1], center_0[2], r])
 
         return True
 
@@ -274,6 +301,7 @@ def check_mesh_delaunay(points, triangles):
         if bad_triangles[i] == 0:
             if check_triangle(i) == False:
                 bad_triangles[i] = 2
+                s_points.append([0, 0, 0, 0])
 
     print('Checked!')
     return bad_triangles
@@ -289,4 +317,4 @@ bad_triangles = check_mesh_delaunay(points, triangles)
 iovtk.write_ug('output', points, triangles, bad_triangles)
 
 if len(s_points) > 0:
-    iovtk.write_ug('output_spheres', s_points, spheres_elem)
+    iovtk.write_ug('output_spheres', sphere_points, spheres_elem)
